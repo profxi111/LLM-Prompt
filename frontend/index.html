@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>提示词智能调度与生成工具</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="chat-container">
+        <div class="chat-header">
+            <div class="header-left">
+                <div class="app-title">🤖 提示词智能调度与生成工具</div>
+                <div class="app-status">
+                    <span class="status-dot"></span>
+                    <span class="status-text">在线</span>
+                </div>
+            </div>
+            <div class="header-right">
+                <button class="header-btn" id="settingsBtn">⚙️ 设置</button>
+                <button class="header-btn" id="modelsBtn">🔧 模型</button>
+                <button class="header-btn" id="visionModelsBtn">👁️ 视觉模型</button>
+            </div>
+        </div>
+
+        <div class="chat-messages" id="chatMessages">
+            <div class="welcome-message">
+                <div class="message-avatar">🤖</div>
+                <div class="message-content">
+                    <p>欢迎使用提示词智能调度与生成工具！</p>
+                    <p>我可以帮您：</p>
+                    <ul>
+                        <li>生成电商产品提示词（标题、卖点、详情页、营销文案）</li>
+                        <li>生成海报设计提示词（构图、色彩、光影、风格、镜头、元素搭配）</li>
+                        <li>支持图片上传作为参考</li>
+                        <li>智能识别您的需求场景</li>
+                    </ul>
+                    <p class="hint">💡 提示：首次使用请先在"模型配置"中添加第三方大模型API</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="chat-input-area">
+            <div class="input-actions">
+                <button class="action-btn upload-btn" id="uploadBtn" title="上传图片">
+                    <span class="btn-icon">📷</span>
+                    <span class="btn-text">上传图片</span>
+                </button>
+                <button class="action-btn paste-btn" id="pasteBtn" title="粘贴截图">
+                    <span class="btn-icon">📋</span>
+                    <span class="btn-text">粘贴截图</span>
+                </button>
+                <button class="action-btn favorite-btn" id="favoriteBtn" title="查看收藏">
+                    <span class="btn-icon">⭐</span>
+                    <span class="btn-text">收藏</span>
+                </button>
+                <button class="action-btn search-btn" id="searchBtn" title="RAG检索">
+                    <span class="btn-icon">🔍</span>
+                    <span class="btn-text">检索</span>
+                </button>
+            </div>
+            
+            <div class="image-preview" id="imagePreview" style="display: none;">
+                <img id="previewImg" src="" alt="预览图">
+                <button class="remove-image-btn" id="removeImage">✕</button>
+            </div>
+
+            <div class="input-wrapper">
+                <textarea 
+                    id="textInput" 
+                    placeholder="请输入您的需求，例如：生成美妆产品电商标题提示词..." 
+                    rows="1"
+                ></textarea>
+                <button class="send-btn" id="sendBtn">
+                    <span>发送</span>
+                </button>
+            </div>
+        </div>
+
+        <input type="file" id="imageInput" accept="image/*" style="display: none;">
+    </div>
+
+    <div class="modal" id="settingsModal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>⚙️ 个人偏好设置</h3>
+                <button class="modal-close-btn" id="closeSettingsBtn">✕</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>常用风格</label>
+                    <input type="text" id="styleInput" placeholder="如：简约、科技感">
+                </div>
+                <div class="form-group">
+                    <label>常用关键词</label>
+                    <input type="text" id="keywordsInput" placeholder="如：高端、专业、创新">
+                </div>
+                <div class="form-group">
+                    <label>语气</label>
+                    <input type="text" id="toneInput" placeholder="如：正式、活泼">
+                </div>
+                <div class="form-group">
+                    <label>默认场景</label>
+                    <select id="sceneInput">
+                        <option value="">自动识别</option>
+                        <option value="ecommerce">电商</option>
+                        <option value="poster">海报</option>
+                    </select>
+                </div>
+                <button class="modal-save-btn" id="saveSettingsBtn">保存设置</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal" id="modelsModal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>🔧 模型配置</h3>
+                <button class="modal-close-btn" id="closeModelsBtn">✕</button>
+            </div>
+            <div class="modal-body">
+                <div class="models-list" id="modelsList">
+                    <p class="empty-hint">暂无模型配置</p>
+                </div>
+                <button class="modal-add-btn" id="addModelBtn">+ 添加模型</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal" id="addModelModal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>➕ 添加模型配置</h3>
+                <button class="modal-close-btn" id="closeAddModelBtn">✕</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>厂商</label>
+                    <select id="modelVendor">
+                        <option value="qwen">通义千问</option>
+                        <option value="deepseek">DeepSeek</option>
+                        <option value="minimax">MiniMax</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>模型名称</label>
+                    <input type="text" id="modelName" placeholder="如：qwen-turbo">
+                </div>
+                <div class="form-group">
+                    <label>API 地址</label>
+                    <input type="text" id="modelApiUrl" placeholder="如：https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation">
+                </div>
+                <div class="form-group">
+                    <label>API Key</label>
+                    <input type="password" id="modelApiKey" placeholder="请输入 API Key">
+                </div>
+                <div class="form-group">
+                    <label>优先级</label>
+                    <input type="number" id="modelPriority" value="1" min="1">
+                </div>
+                <div class="form-group">
+                    <label>适用场景</label>
+                    <select id="modelScene">
+                        <option value="">通用</option>
+                        <option value="ecommerce">电商</option>
+                        <option value="poster">海报</option>
+                    </select>
+                </div>
+                <button class="modal-save-btn" id="confirmModelBtn">确认添加</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal" id="favoritesModal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>⭐ 我的收藏</h3>
+                <button class="modal-close-btn" id="closeFavoritesBtn">✕</button>
+            </div>
+            <div class="modal-body">
+                <div class="favorites-list" id="favoritesList">
+                    <p class="empty-hint">暂无收藏</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal" id="visionModelsModal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>👁️ 视觉模型配置</h3>
+                <button class="modal-close-btn" id="closeVisionModelsBtn">✕</button>
+            </div>
+            <div class="modal-body">
+                <div class="vision-models-list" id="visionModelsList">
+                    <p class="empty-hint">暂无视觉模型配置</p>
+                </div>
+                <button class="modal-add-btn" id="addVisionModelBtn">+ 添加视觉模型</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal" id="addVisionModelModal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>➕ 添加视觉模型</h3>
+                <button class="modal-close-btn" id="closeAddVisionModelBtn">✕</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>厂商</label>
+                    <select id="visionModelVendor">
+                        <option value="qwen-vl">通义千问VL</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>模型名称</label>
+                    <input type="text" id="visionModelName" placeholder="如：qwen-vl-max">
+                </div>
+                <div class="form-group">
+                    <label>API 地址</label>
+                    <input type="text" id="visionModelApiUrl" placeholder="如：https://dashscope.aliyuncs.com/compatible-mode/v1/multimodal/generation">
+                </div>
+                <div class="form-group">
+                    <label>API Key</label>
+                    <input type="password" id="visionModelApiKey" placeholder="请输入 API Key">
+                </div>
+                <button class="modal-save-btn" id="confirmVisionModelBtn">确认添加</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal" id="searchModal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>🔍 RAG 检索</h3>
+                <button class="modal-close-btn" id="closeSearchBtn">✕</button>
+            </div>
+            <div class="modal-body">
+                <div class="search-box">
+                    <input type="text" id="searchInput" placeholder="输入关键词进行语义检索...">
+                    <button class="search-action-btn" id="searchActionBtn">搜索</button>
+                </div>
+                <div class="search-results" id="searchResults">
+                    <p class="empty-hint">输入关键词开始检索</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
