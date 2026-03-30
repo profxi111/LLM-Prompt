@@ -248,6 +248,78 @@
         </div>
     </div>
 
+    <!-- ============================================================
+         V2 新增：调整工具栏（在生成结果区域显示）
+    ============================================================ -->
+    <div class="adjust-toolbar" id="adjustToolbar" style="display: none;">
+        <div class="toolbar-header">
+            <h4>📝 生成的提示词</h4>
+            <div class="toolbar-actions">
+                <button class="toolbar-btn" id="copyPromptBtn">📋 复制</button>
+                <button class="toolbar-btn" id="favoritePromptBtn">⭐ 收藏</button>
+            </div>
+        </div>
+
+        <div class="prompt-display" id="promptDisplay"></div>
+
+        <div class="adjust-section">
+            <h5>═══ 调整工具栏 ═══</h5>
+            <div class="adjust-form">
+                <label>指定 Agent：</label>
+                <select id="targetAgentSelect">
+                    <option value="S2">构图生成（推荐）</option>
+                    <option value="S3">整理优化</option>
+                    <option value="S4">风格延展</option>
+                    <option value="S1">图片理解</option>
+                </select>
+
+                <label>调整说明：</label>
+                <textarea id="adjustInstruction" rows="2" placeholder="请描述您希望如何调整..."></textarea>
+
+                <button class="submit-adjust-btn" id="submitAdjustBtn">🚀 提交调整</button>
+            </div>
+        </div>
+
+        <div class="agent-chain-section">
+            <h5>═══ Agent 链路 ═══</h5>
+            <div class="agent-chain" id="agentChain"></div>
+        </div>
+
+        <div class="chain-detail-modal" id="chainDetailModal" style="display: none;">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3 id="chainDetailTitle">Agent 详情</h3>
+                    <button class="modal-close-btn" id="closeChainDetailBtn">✕</button>
+                </div>
+                <div class="modal-body">
+                    <div class="detail-section">
+                        <h5>📥 输入</h5>
+                        <pre class="detail-content" id="chainDetailInput"></pre>
+                    </div>
+                    <div class="detail-section">
+                        <h5>📤 输出</h5>
+                        <pre class="detail-content" id="chainDetailOutput"></pre>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============================================================
+         V2 新增：变体选择弹窗（S4 返回3个变体时显示）
+    ============================================================ -->
+    <div class="modal" id="variantsModal" style="display: none;">
+        <div class="modal-content variants-modal-content">
+            <div class="modal-header">
+                <h3>🎨 风格变体选择</h3>
+                <button class="modal-close-btn" id="closeVariantsBtn">✕</button>
+            </div>
+            <div class="modal-body">
+                <div class="variants-list" id="variantsList"></div>
+            </div>
+        </div>
+    </div>
+
     <script src="/static/app.js"></script>
 </body>
 </html>

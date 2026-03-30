@@ -494,15 +494,36 @@ body {
     gap: 8px;
 }
 
-.delete-btn {
+.edit-btn, .test-btn, .delete-btn {
     padding: 6px 12px;
-    background: #ff4757;
-    color: white;
     border: none;
     border-radius: 4px;
     cursor: pointer;
     font-size: 0.9em;
     transition: all 0.3s;
+}
+
+.test-btn {
+    background: #2ed573;
+    color: white;
+}
+
+.test-btn:hover {
+    background: #26d063;
+}
+
+.edit-btn {
+    background: #1e90ff;
+    color: white;
+}
+
+.edit-btn:hover {
+    background: #1873cc;
+}
+
+.delete-btn {
+    background: #ff4757;
+    color: white;
 }
 
 .delete-btn:hover {
@@ -641,4 +662,291 @@ body {
         flex: 1;
         min-width: 80px;
     }
+}
+
+/* ============================================================
+   V2 新增：调整工具栏
+   ============================================================ */
+.adjust-toolbar {
+    background: rgba(30, 15, 60, 0.95);
+    border-top: 1px solid rgba(139, 92, 246, 0.4);
+    padding: 16px 20px;
+    animation: slideUp 0.3s ease-out;
+}
+
+@keyframes slideUp {
+    from { transform: translateY(20px); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+}
+
+.toolbar-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+}
+
+.toolbar-header h4 {
+    color: #e2e8f0;
+    font-size: 15px;
+}
+
+.toolbar-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.toolbar-btn {
+    background: rgba(139, 92, 246, 0.2);
+    border: 1px solid rgba(139, 92, 246, 0.5);
+    color: #c4b5fd;
+    padding: 5px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
+    transition: all 0.2s;
+}
+
+.toolbar-btn:hover {
+    background: rgba(139, 92, 246, 0.4);
+    color: #fff;
+}
+
+.prompt-display {
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(139, 92, 246, 0.3);
+    border-radius: 8px;
+    padding: 14px;
+    margin-bottom: 14px;
+    max-height: 240px;
+    overflow-y: auto;
+}
+
+.prompt-text {
+    color: #f1f5f9;
+    font-size: 14px;
+    line-height: 1.7;
+    white-space: pre-wrap;
+}
+
+.adjust-section h5,
+.agent-chain-section h5 {
+    color: #a78bfa;
+    font-size: 12px;
+    letter-spacing: 2px;
+    margin: 10px 0 8px;
+}
+
+.adjust-form {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.adjust-form label {
+    color: #94a3b8;
+    font-size: 13px;
+}
+
+.adjust-form select,
+.adjust-form textarea {
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(139, 92, 246, 0.3);
+    color: #f1f5f9;
+    border-radius: 6px;
+    padding: 8px 10px;
+    font-size: 13px;
+    font-family: inherit;
+    resize: vertical;
+}
+
+.adjust-form select:focus,
+.adjust-form textarea:focus {
+    outline: none;
+    border-color: rgba(139, 92, 246, 0.7);
+}
+
+.submit-adjust-btn {
+    background: linear-gradient(135deg, #7c3aed, #4f46e5);
+    color: #fff;
+    border: none;
+    padding: 9px 18px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+    transition: all 0.2s;
+    align-self: flex-end;
+}
+
+.submit-adjust-btn:hover {
+    opacity: 0.9;
+    transform: translateY(-1px);
+}
+
+.submit-adjust-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+}
+
+/* ============================================================
+   V2 新增：Agent 链路图
+   ============================================================ */
+.agent-chain {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 8px;
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 8px;
+}
+
+.chain-node {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 10px;
+    background: rgba(139, 92, 246, 0.15);
+    border: 1px solid rgba(139, 92, 246, 0.4);
+    border-radius: 20px;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-size: 12px;
+}
+
+.chain-node:hover {
+    background: rgba(139, 92, 246, 0.35);
+    border-color: rgba(139, 92, 246, 0.7);
+}
+
+.chain-number {
+    background: rgba(139, 92, 246, 0.5);
+    color: #fff;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    font-weight: bold;
+}
+
+.chain-name {
+    color: #e2e8f0;
+}
+
+.chain-status {
+    color: #4ade80;
+    font-size: 12px;
+}
+
+.chain-arrow {
+    color: #64748b;
+    font-size: 14px;
+}
+
+.chain-running {
+    animation: pulse 1s infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+}
+
+.chain-failed {
+    color: #f87171 !important;
+}
+
+.chain-detail-modal .modal-content {
+    max-width: 600px;
+}
+
+.detail-section {
+    margin-bottom: 16px;
+}
+
+.detail-section h5 {
+    color: #a78bfa;
+    font-size: 13px;
+    margin-bottom: 6px;
+}
+
+.detail-content {
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(139, 92, 246, 0.3);
+    border-radius: 6px;
+    padding: 10px;
+    color: #e2e8f0;
+    font-size: 12px;
+    white-space: pre-wrap;
+    max-height: 200px;
+    overflow-y: auto;
+    font-family: monospace;
+}
+
+/* ============================================================
+   V2 新增：变体选择弹窗
+   ============================================================ */
+.variants-modal-content {
+    max-width: 700px;
+    max-height: 85vh;
+}
+
+.variants-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    max-height: 65vh;
+    overflow-y: auto;
+}
+
+.variant-item {
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(139, 92, 246, 0.3);
+    border-radius: 10px;
+    padding: 14px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.variant-item:hover {
+    border-color: rgba(139, 92, 246, 0.7);
+    background: rgba(139, 92, 246, 0.1);
+}
+
+.variant-header {
+    margin-bottom: 8px;
+}
+
+.variant-header strong {
+    color: #c4b5fd;
+    font-size: 14px;
+}
+
+.variant-content {
+    color: #94a3b8;
+    font-size: 13px;
+    line-height: 1.6;
+    max-height: 120px;
+    overflow: hidden;
+    position: relative;
+}
+
+.variant-content::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 30px;
+    background: linear-gradient(transparent, rgba(0,0,0,0.5));
+}
+
+.variant-item.selected {
+    border-color: #4ade80;
+    background: rgba(74, 222, 128, 0.1);
 }

@@ -27,10 +27,14 @@ class EmbeddingService:
         if HAS_SENTENCE_TRANSFORMERS:
             model_name = 'm3e-small'
             device = 'cpu'
-            
-            print(f"正在加载嵌入模型: {model_name} (设备: {device})")
-            self._model = SentenceTransformer(model_name, device=device)
-            print(f"嵌入模型加载完成，向量维度: {self._model.get_sentence_embedding_dimension()}")
+
+            try:
+                print(f"正在加载嵌入模型: {model_name} (设备: {device})")
+                self._model = SentenceTransformer(model_name, device=device)
+                print(f"嵌入模型加载完成，向量维度: {self._model.get_sentence_embedding_dimension()}")
+            except Exception as e:
+                print(f"嵌入模型加载失败: {e}，将使用简单文本哈希作为向量")
+                self._model = None
         else:
             print("使用简单文本哈希作为向量（需安装 sentence-transformers 以获得更好的语义检索效果）")
     

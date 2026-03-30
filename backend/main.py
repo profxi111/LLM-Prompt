@@ -334,6 +334,60 @@ async def add_model(request: ModelRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+import requests
+
+
+@app.post("/api/models/{model_id}/test")
+async def test_model(model_id: int):
+    try:
+        row = execute_query(
+            "SELECT * FROM models WHERE id = ?",
+            (model_id,),
+            fetch_one=True
+        )
+
+        if not row:
+            return {"code": -1, "message": "模型不存在", "data": None}
+
+        try:
+            encryption_key = row["encryption_key"]
+            api_key_encrypted = row["api_key_encrypted"]
+            if encryption_key:
+                fernet = Fernet(encryption_key.encode())
+                decrypted_key = fernet.decrypt(api_key_encrypted.encode()).decode()
+            else:
+                decrypted_key = api_key_encrypted
+        except Exception:
+            decrypted_key = row["api_key_encrypted"]
+
+        headers = {
+            "Authorization": f"Bearer {decrypted_key}",
+            "Content-Type": "application/json",
+            "anthropic-version": "2023-06-01"
+        }
+
+        payload = {
+            "model": row["name"],
+            "max_tokens": 50,
+            "messages": [{"role": "user", "content": "Hello, respond with 'OK'."}]
+        }
+
+        response = requests.post(row["api_url"], headers=headers, json=payload, timeout=30)
+        response.raise_for_status()
+
+        return {
+            "code": 0,
+            "message": "连接成功",
+            "data": {"response": response.text[:100]}
+        }
+    except Exception as e:
+        return {
+            "code": -1,
+            "message": f"连接失败: {str(e)}",
+            "data": None
+        }
+
+
 @app.delete("/api/models/{model_id}")
 async def delete_model(model_id: int):
     try:

@@ -119,9 +119,13 @@ class MasterAgent:
         return User()
     
     def _get_rag_context(self, text: str) -> List[Dict[str, Any]]:
+        if self.embedding_service._model is None:
+            print("DEBUG: 嵌入模型未加载，跳过RAG检索")
+            return []
+
         query_vector = self.embedding_service.embed_text(text)
         search_results = self.rag_service.search(query_vector, top_k=3, threshold=0.5)
-        
+
         contexts = []
         for idx, score in search_results:
             row = execute_query(
@@ -136,10 +140,16 @@ class MasterAgent:
                     "category": row["category"],
                     "similarity": score
                 })
-        
+
         return contexts
     
     def _identify_intent(self, image_path: Optional[str], text: str, user: User, rag_context: List[Dict[str, Any]]) -> Dict[str, Any]:
+        intent = self._simple_identify_intent(text)
+
+        if intent["confidence"] >= 0.9:
+            print(f"DEBUG: 使用简单意图识别: {intent['scene']}")
+            return intent
+
         image_description = ""
         if image_path:
             try:
@@ -147,19 +157,19 @@ class MasterAgent:
             except Exception as e:
                 print(f"视觉模型调用失败: {e}")
                 image_description = ""
-        
+
         context_text = "\n".join([f"参考{c['category']}提示词: {c['content']}" for c in rag_context])
-        
+
         prompt = f"""你是一个意图识别助手，需要判断用户的需求属于哪个场景。
 
 用户需求: {text}
 用户偏好: 风格={user.style}, 关键词={user.keywords}, 默认场景={user.default_scene}
 参考提示词: {context_text}"""
-        
+
         if image_description:
             prompt += f"""
 图片描述: {image_description}"""
-        
+
         prompt += """
 请判断用户需求属于以下哪个场景:
 - ecommerce: 电商相关，如产品标题、卖点、详情页、营销文案等
@@ -172,29 +182,52 @@ class MasterAgent:
   "confidence": 0.0-1.0,
   "reason": "判断理由"
 }}"""
-        
+
         model = self._select_model("general")
-        
+        print(f"DEBUG: Selected model for intent: {model['name']}")
+
         try:
+            print(f"DEBUG: Calling model with prompt...")
             result = self._call_model(model, prompt)
-            
+            print(f"DEBUG: Model returned result")
+
             json_start = result.find("{")
             json_end = result.rfind("}") + 1
-            
+
             if json_start >= 0 and json_end > json_start:
                 json_str = result[json_start:json_end]
                 intent_data = json.loads(json_str)
-                
+
                 if "scene" in intent_data:
                     return intent_data
         except Exception as e:
             print(f"意图识别失败: {e}")
-        
+
         return {
-            "scene": "other",
-            "confidence": 0.0,
-            "reason": "意图识别失败，使用默认值"
+            "scene": intent["scene"],
+            "confidence": intent["confidence"],
+            "reason": "意图识别失败，使用默认识别结果"
         }
+
+    def _simple_identify_intent(self, text: str) -> Dict[str, Any]:
+        ecommerce_keywords = ["产品", "标题", "卖点", "详情", "营销", "文案", "电商", "商品", "宝贝", "主图", "SKU", "详情页", "推广", "优惠券", "促销", "购买", "订单", "发货", "物流"]
+        poster_keywords = ["海报", "设计", "构图", "色彩", "光影", "风格", "镜头", "元素", "视觉", "画面", "配色", "字体", "排版", "创意", "广告"]
+
+        text_lower = text.lower()
+        ecommerce_score = sum(1 for kw in ecommerce_keywords if kw in text_lower)
+        poster_score = sum(1 for kw in poster_keywords if kw in text_lower)
+
+        if ecommerce_score > poster_score and ecommerce_score >= 2:
+            return {"scene": "ecommerce", "confidence": 0.9, "reason": "基于关键词匹配"}
+        elif poster_score > ecommerce_score and poster_score >= 2:
+            return {"scene": "poster", "confidence": 0.9, "reason": "基于关键词匹配"}
+        elif ecommerce_score > 0 or poster_score > 0:
+            if ecommerce_score > poster_score:
+                return {"scene": "ecommerce", "confidence": 0.5, "reason": "基于关键词匹配"}
+            else:
+                return {"scene": "poster", "confidence": 0.5, "reason": "基于关键词匹配"}
+
+        return {"scene": "other", "confidence": 0.3, "reason": "无法识别，使用默认"}
     
     def _select_model(self, scene: str) -> Dict[str, Any]:
         rows = execute_query(
@@ -217,6 +250,7 @@ class MasterAgent:
         raise Exception("没有可用的模型配置，请先在模型配置中添加第三方大模型API")
     
     def _call_model(self, model: Dict[str, Any], prompt: str) -> str:
+        print(f"DEBUG _call_model: model={model['name']}, prompt_len={len(prompt)}")
         try:
             if model.get("encryption_key"):
                 fernet = Fernet(model["encryption_key"].encode())
@@ -226,16 +260,19 @@ class MasterAgent:
         except Exception as e:
             print(f"解密API密钥失败: {e}")
             decrypted_key = model["api_key_encrypted"]
-        
+
         config = {
             "vendor": model["vendor"],
             "name": model["name"],
             "api_url": model["api_url"],
             "api_key": decrypted_key
         }
-        
+        print(f"DEBUG _call_model: creating adapter")
         adapter = ModelAdapterFactory.create(config)
-        return adapter.call(prompt)
+        print(f"DEBUG _call_model: calling adapter.call()")
+        result = adapter.call(prompt)
+        print(f"DEBUG _call_model: got result")
+        return result
     
     def _log_request(self, user_id: int, intent_result: str, agent_used: str, model_id: Optional[int], duration_ms: int, success: int, error: Optional[str] = None):
         execute_query(
