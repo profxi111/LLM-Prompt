@@ -34,4 +34,3 @@ class DeepSeekAdapter(ModelAdapter):
 
 
 ModelAdapterFactory.register("deepseek", DeepSeekAdapter)
-ModelAdapterFactory.register("deepseek", DeepSeekAdapter)

@@ -13,6 +13,11 @@ from backend.agents.master import MasterAgent
 from backend.services.rag import get_rag_service
 from backend.services.embedding import get_embedding_service
 
+# V2 新增路由
+from backend.routes.adjust import router as adjust_router
+from backend.routes.sessions import router as sessions_router
+from backend.routes.knowledge import router as knowledge_router
+
 app = FastAPI(
     title="提示词智能调度与生成工具",
     description="局域网专属的提示词智能生成与调度工具",
@@ -32,6 +37,11 @@ os.makedirs("data", exist_ok=True)
 os.makedirs("data/faiss_index", exist_ok=True)
 
 init_database()
+
+# V2 注册新路由
+app.include_router(adjust_router)
+app.include_router(sessions_router)
+app.include_router(knowledge_router)
 
 app.mount("/static", StaticFiles(directory="frontend"), name="static")
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
@@ -57,6 +67,7 @@ async def health_check():
 class GenerateRequest(BaseModel):
     image_path: Optional[str] = None
     text: str
+    session_id: Optional[str] = None  # V2: 继续指定会话
 
 
 class FavoriteRequest(BaseModel):
@@ -108,9 +119,16 @@ async def upload_image(file: UploadFile = File(...)):
 
 @app.post("/api/generate")
 async def generate_prompt(request: GenerateRequest):
+    """
+    V2: 支持 session_id 参数，继续指定会话。
+    """
     try:
         master_agent = MasterAgent()
-        result = master_agent.process_request(request.image_path, request.text)
+        result = master_agent.process_request(
+            request.image_path,
+            request.text,
+            session_id=request.session_id
+        )
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -334,11 +352,12 @@ async def add_model(request: ModelRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-import requests
-
-
 @app.post("/api/models/{model_id}/test")
 async def test_model(model_id: int):
+    """
+    V2 Fix：使用 ModelAdapterFactory 自动适配不同厂商的 API 格式，
+    不再硬编码 anthropic 格式的 headers 和 body。
+    """
     try:
         row = execute_query(
             "SELECT * FROM models WHERE id = ?",
@@ -360,26 +379,29 @@ async def test_model(model_id: int):
         except Exception:
             decrypted_key = row["api_key_encrypted"]
 
-        headers = {
-            "Authorization": f"Bearer {decrypted_key}",
-            "Content-Type": "application/json",
-            "anthropic-version": "2023-06-01"
+        # V2 Fix：使用对应厂商的 Adapter 来构建请求和解析响应
+        from backend.adapters.base import ModelAdapterFactory
+        config = {
+            "vendor": row["vendor"],
+            "name": row["name"],
+            "api_url": row["api_url"],
+            "api_key": decrypted_key
         }
 
-        payload = {
-            "model": row["name"],
-            "max_tokens": 50,
-            "messages": [{"role": "user", "content": "Hello, respond with 'OK'."}]
-        }
+        adapter = ModelAdapterFactory.create(config)
 
-        response = requests.post(row["api_url"], headers=headers, json=payload, timeout=30)
-        response.raise_for_status()
+        # 简单测试 prompt
+        result = adapter.call(
+            "Hello, respond with 'OK' in one word.",
+            max_tokens=50
+        )
 
         return {
             "code": 0,
             "message": "连接成功",
-            "data": {"response": response.text[:100]}
+            "data": {"response": result[:100]}
         }
+
     except Exception as e:
         return {
             "code": -1,

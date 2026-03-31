@@ -23,20 +23,14 @@ class MiniMaxAdapter(ModelAdapter):
         }
 
     def _parse_response(self, response: Dict[str, Any]) -> str:
-        print(f"DEBUG MiniMax _parse_response: input={response}")
         try:
             content = response.get("content", [])
-            print(f"DEBUG MiniMax: content={content}")
             if isinstance(content, list):
                 for item in content:
                     if item.get("type") == "text":
-                        result = item.get("text", "")
-                        print(f"DEBUG MiniMax: extracted text={result[:50]}")
-                        return result
-            print("DEBUG MiniMax: No text found in content")
+                        return item.get("text", "")
             return ""
         except (KeyError, IndexError, TypeError) as e:
-            print(f"DEBUG MiniMax: Parse error: {e}")
             raise ValueError("MiniMax API 响应格式异常")
 
 

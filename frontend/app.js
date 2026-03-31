@@ -1,4 +1,4 @@
-const API_BASE = 'http://localhost:8003';
+const API_BASE = 'http://localhost:8000';
 
 let uploadedImagePath = null;
 let currentPrompt = null;

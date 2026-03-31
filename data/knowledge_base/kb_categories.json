@@ -1,0 +1,44 @@
+[
+  {
+    "id": "ecommerce_title",
+    "name": "电商_产品标题",
+    "description": "生成适合电商平台的产品标题提示词，侧重转化率和吸引力",
+    "tags": ["电商", "标题", "转化率", "产品"],
+    "examples": 0
+  },
+  {
+    "id": "poster_tech",
+    "name": "海报_科技风",
+    "description": "科技感/赛博朋克/未来感风格的海报设计提示词",
+    "tags": ["海报", "科技", "赛博朋克", "未来感"],
+    "examples": 0
+  },
+  {
+    "id": "poster_vintage",
+    "name": "海报_复古风",
+    "description": "复古、怀旧、胶片质感风格的海报设计提示词",
+    "tags": ["海报", "复古", "怀旧", "胶片"],
+    "examples": 0
+  },
+  {
+    "id": "poster_guochao",
+    "name": "海报_国潮风",
+    "description": "中国传统文化与潮流元素结合的海报设计提示词",
+    "tags": ["海报", "国潮", "中国风", "传统文化"],
+    "examples": 0
+  },
+  {
+    "id": "video_empty_shot",
+    "name": "视频_空镜头",
+    "description": "6秒科技空镜头视频生成提示词，包含运镜、光效、粒子描述",
+    "tags": ["视频", "空镜头", "运镜", "光效"],
+    "examples": 0
+  },
+  {
+    "id": "other_general",
+    "name": "其他_通用",
+    "description": "不属于以上分类的通用提示词",
+    "tags": ["通用", "杂项"],
+    "examples": 0
+  }
+]

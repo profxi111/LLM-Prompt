@@ -1,133 +1,405 @@
-from typing import Dict, Any, Optional, List
+"""
+V2 MasterAgent — 完全重写
+支持 4 种路由：S1_S2_S3 / S2_S3 / S5_S3 / K1
+支持 process_adjust 多轮调整
+支持 session 管理
+"""
+
 import json
 import time
+import uuid
+from typing import Dict, Any, Optional, List
 from cryptography.fernet import Fernet
+
+from backend.agents.context import ContextContainer
 from backend.database.db import execute_query
-from backend.database.models import User, Model
 from backend.services.rag import get_rag_service
 from backend.services.embedding import get_embedding_service
 from backend.services.vision import get_vision_service
+from backend.services.knowledge_base import get_knowledge_base_service
 from backend.adapters.base import ModelAdapterFactory
 
 
 class MasterAgent:
+    """
+    V2 MasterAgent — 统一调度入口。
+    支持 4 种路由：
+    - S1_S2_S3：有图片 + 有需求 → 图片理解 → 构图生成 → 整理优化
+    - S2_S3：纯文字需求 → 构图生成 → 整理优化
+    - S5_S3：视频/空镜头需求 → 视频空镜 → 整理优化
+    - K1：分类请求 → 纯向量检索，无 LLM
+    """
+
     def __init__(self):
         self.rag_service = get_rag_service()
         self.embedding_service = get_embedding_service()
         self.vision_service = get_vision_service()
-    
-    def process_request(self, image_path: Optional[str], text: str, user_id: int = 1) -> Dict[str, Any]:
+        self.kb_service = get_knowledge_base_service()
+
+    def process_request(
+        self,
+        image_path: Optional[str],
+        text: str,
+        user_id: int = 1,
+        session_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        V2 统一入口。
+        如果传入 session_id，则继续该会话；否则创建新会话。
+        """
         start_time = time.time()
-        
+
         try:
             user = self._get_user_preference(user_id)
-            
-            rag_context = self._get_rag_context(text)
-            
-            intent_result = self._identify_intent(image_path, text, user, rag_context)
-            
-            scene = intent_result.get("scene", "other")
-            confidence = intent_result.get("confidence", 0.0)
-            
-            if confidence < 0.7:
-                return {
-                    "code": -1,
-                    "message": "意图识别置信度不足，请明确您的需求类型",
-                    "data": {
-                        "intent_result": intent_result,
-                        "suggested_scenes": ["ecommerce", "poster"]
-                    }
-                }
-            
-            model = self._select_model(scene)
-            
-            if scene == "ecommerce":
-                from backend.agents.ecommerce import EcommerceAgent
-                agent = EcommerceAgent()
-            elif scene == "poster":
-                from backend.agents.poster import PosterAgent
-                agent = PosterAgent()
+
+            # 获取或创建 ContextContainer
+            if session_id:
+                context = self._load_session(session_id)
+                if context is None:
+                    context = self._new_context(session_id, user_id, image_path, text)
             else:
-                return {
-                    "code": -1,
-                    "message": "暂不支持该场景",
-                    "data": {"scene": scene}
-                }
-            
-            prompt = agent.generate_prompt(image_path, text, user, rag_context)
-            
-            result = self._call_model(model, prompt)
-            
-            duration_ms = int((time.time() - start_time) * 1000)
-            
-            self._log_request(
-                user_id=user_id,
-                intent_result=json.dumps(intent_result, ensure_ascii=False),
-                agent_used=agent.__class__.__name__,
-                model_id=model["id"],
-                duration_ms=duration_ms,
-                success=1
-            )
-            
+                context = self._new_context("", user_id, image_path, text)
+
+            # 意图识别 + 路由决策
+            route = self._decide_route(image_path, text, user)
+            context.route = route
+
+            # 根据路由执行 Agent 链
+            result_prompt = self._execute_route(context, route, user)
+
+            # 设置最终输出
+            context.set_final(result_prompt)
+
+            # 计算总耗时
+            total_ms = int((time.time() - start_time) * 1000)
+            context.total_duration_ms = total_ms
+
+            # 保存 session
+            self._save_session(context)
+
             return {
                 "code": 0,
                 "message": "生成成功",
                 "data": {
-                    "prompt": result,
-                    "scene": scene,
-                    "confidence": confidence,
-                    "model_used": model["name"],
-                    "duration_ms": duration_ms
+                    "session_id": context.session_id,
+                    "final_prompt": context.final_prompt,
+                    "variants": context.variants,
+                    "agent_chain": context.agent_chain,
+                    "route": context.route,
+                    "confidence": context.confidence,
+                    "classified_category": context.classified_category,
+                    "duration_ms": total_ms,
                 }
             }
-            
+
         except Exception as e:
-            duration_ms = int((time.time() - start_time) * 1000)
-            self._log_request(
-                user_id=user_id,
-                intent_result="",
-                agent_used="",
-                model_id=None,
-                duration_ms=duration_ms,
-                success=0,
-                error=str(e)
-            )
-            
+            total_ms = int((time.time() - start_time) * 1000)
             return {
                 "code": -1,
                 "message": f"处理失败: {str(e)}",
                 "data": None
             }
-    
-    def _get_user_preference(self, user_id: int) -> User:
-        row = execute_query(
-            "SELECT * FROM users WHERE id = ?",
-            (user_id,),
+
+    def process_adjust(
+        self,
+        session_id: str,
+        target_agent: str,
+        user_instruction: str
+    ) -> Dict[str, Any]:
+        """
+        V2 调整入口 — 用户对指定 Agent 的输出进行调整。
+        找到该 Agent 的输出，重新生成，更新 ContextContainer。
+        """
+        start_time = time.time()
+
+        try:
+            context = self._load_session(session_id)
+            if context is None:
+                raise ValueError(f"会话不存在: {session_id}")
+
+            user = self._get_user_preference(1)
+
+            # 注入 master 调用方法到子 Agent
+            master_call = lambda prompt, **kw: self._call_model_for_subagent(
+                prompt, context=context, **kw
+            )
+
+            # 根据 target_agent 决定如何处理
+            if target_agent == "S2":
+                # 重新执行 S2
+                from backend.agents.sub.s2_composition_gen import S2CompositionGenAgent
+                agent = S2CompositionGenAgent()
+                agent._master_call_model = master_call
+                context.agent_outputs = [o for o in context.agent_outputs if o.agent_id != "S2"]
+                context = agent.execute(context, user)
+                # S2 重做 → S3 也需重做
+                context.agent_outputs = [o for o in context.agent_outputs if o.agent_id != "S3"]
+
+            elif target_agent == "S3":
+                from backend.agents.sub.s3_organize import S3OrganizeAgent
+                agent = S3OrganizeAgent()
+                agent._master_call_model = master_call
+                context.agent_outputs = [o for o in context.agent_outputs if o.agent_id != "S3"]
+
+            elif target_agent == "S4":
+                from backend.agents.sub.s4_style_extend import S4StyleExtendAgent
+                agent = S4StyleExtendAgent()
+                agent._master_call_model = master_call
+                context.agent_outputs = [o for o in context.agent_outputs if o.agent_id != "S4"]
+                context = agent.execute(context, user)
+                return self._finalize_adjust(context, start_time, user_instruction)
+
+            elif target_agent == "S1":
+                from backend.agents.sub.s1_image_understand import S1ImageUnderstandAgent
+                agent = S1ImageUnderstandAgent()
+                context.agent_outputs = [o for o in context.agent_outputs if o.agent_id != "S1"]
+                context = agent.execute(context, user)
+
+            else:
+                raise ValueError(f"不支持的 Agent: {target_agent}")
+
+            # 继续执行 S3
+            from backend.agents.sub.s3_organize import S3OrganizeAgent
+            s3 = S3OrganizeAgent()
+            s3._master_call_model = master_call
+            context = s3.execute(context, user)
+
+            return self._finalize_adjust(context, start_time, user_instruction)
+
+        except Exception as e:
+            return {
+                "code": -1,
+                "message": f"调整失败: {str(e)}",
+                "data": None
+            }
+
+    def _finalize_adjust(
+        self,
+        context: ContextContainer,
+        start_time: float,
+        user_instruction: str
+    ) -> Dict[str, Any]:
+        """完成调整后返回"""
+        total_ms = int((time.time() - start_time) * 1000)
+        context.total_duration_ms = total_ms
+        self._save_session(context)
+
+        return {
+            "code": 0,
+            "message": "调整成功",
+            "data": {
+                "session_id": context.session_id,
+                "final_prompt": context.final_prompt,
+                "variants": context.variants,
+                "agent_chain": context.agent_chain,
+                "duration_ms": total_ms,
+            }
+        }
+
+    # ─── 路由决策 ────────────────────────────────────────────
+
+    def _decide_route(
+        self,
+        image_path: Optional[str],
+        text: str,
+        user: Dict[str, Any]
+    ) -> str:
+        """
+        V2 路由决策逻辑。
+        优先级：K1（分类）> S5（视频）> S1（有图）> S2（默认）
+        """
+        text_lower = text.lower()
+
+        # K1：纯分类请求（高频操作，零成本）
+        k1_keywords = ["分类", "归类", "属于哪种", "哪类", "category"]
+        if any(kw in text for kw in k1_keywords):
+            return "K1"
+
+        # S5：视频/空镜头需求
+        s5_keywords = ["视频", "空镜", "镜头", "video", "空镜头", "科技视频", "产品视频"]
+        if any(kw in text_lower for kw in s5_keywords):
+            return "S5_S3"
+
+        # S1：有图片上传
+        if image_path:
+            return "S1_S2_S3"
+
+        # 默认：纯文字 → S2
+        return "S2_S3"
+
+    def _execute_route(
+        self,
+        context: ContextContainer,
+        route: str,
+        user: Dict[str, Any]
+    ) -> str:
+        """
+        根据路由执行对应的 Agent 链。
+        每个子 Agent 需要注入 master 的 LLM 调用方法。
+        """
+        master_call = lambda prompt, **kw: self._call_model_for_subagent(
+            prompt, context=context, **kw
+        )
+
+        if route == "K1":
+            from backend.agents.sub.k1_classifier import K1ClassifierAgent
+            agent = K1ClassifierAgent()
+            context = agent.execute(context, user)
+            # K1 不输出 prompt，仅分类
+            return context.classified_category or "general"
+
+        elif route == "S1_S2_S3":
+            # S1 → S2 → S3
+            from backend.agents.sub.s1_image_understand import S1ImageUnderstandAgent
+            from backend.agents.sub.s2_composition_gen import S2CompositionGenAgent
+            from backend.agents.sub.s3_organize import S3OrganizeAgent
+
+            s1 = S1ImageUnderstandAgent()
+            context = s1.execute(context, user)
+
+            s2 = S2CompositionGenAgent()
+            s2._master_call_model = master_call
+            context = s2.execute(context, user)
+
+            s3 = S3OrganizeAgent()
+            s3._master_call_model = master_call
+            context = s3.execute(context, user)
+
+            s3_out = context.get_output("S3")
+            return s3_out.output_text if s3_out else ""
+
+        elif route == "S2_S3":
+            from backend.agents.sub.s2_composition_gen import S2CompositionGenAgent
+            from backend.agents.sub.s3_organize import S3OrganizeAgent
+
+            s2 = S2CompositionGenAgent()
+            s2._master_call_model = master_call
+            context = s2.execute(context, user)
+
+            s3 = S3OrganizeAgent()
+            s3._master_call_model = master_call
+            context = s3.execute(context, user)
+
+            s3_out = context.get_output("S3")
+            return s3_out.output_text if s3_out else ""
+
+        elif route == "S5_S3":
+            from backend.agents.sub.s5_video_shot import S5VideoShotAgent
+            from backend.agents.sub.s3_organize import S3OrganizeAgent
+
+            s5 = S5VideoShotAgent()
+            s5._master_call_model = master_call
+            context = s5.execute(context, user)
+
+            s3 = S3OrganizeAgent()
+            s3._master_call_model = master_call
+            context = s3.execute(context, user)
+
+            s3_out = context.get_output("S3")
+            return s3_out.output_text if s3_out else ""
+
+        else:
+            raise ValueError(f"不支持的路由: {route}")
+
+    # ─── LLM 调用 ────────────────────────────────────────────
+
+    def _call_model_for_subagent(
+        self,
+        prompt: str,
+        context: ContextContainer,
+        temperature: float = 0.7,
+        max_tokens: int = 2000
+    ) -> str:
+        """供子 Agent 调用的 LLM 入口"""
+        model = self._select_model("general")
+        return self._call_model_with_config(
+            model=model,
+            prompt=prompt,
+            temperature=temperature,
+            max_tokens=max_tokens
+        )
+
+    def _select_model(self, scene: str) -> Dict[str, Any]:
+        """从数据库选择最高优先级的可用模型"""
+        rows = execute_query(
+            "SELECT * FROM models WHERE enabled = 1 AND (scene = ? OR scene IS NULL) ORDER BY priority DESC LIMIT 1",
+            (scene,),
             fetch_one=True
         )
-        
-        if row:
-            return User(
-                id=row["id"],
-                name=row["name"],
-                style=row["style"],
-                keywords=row["keywords"],
-                tone=row["tone"],
-                default_scene=row["default_scene"]
-            )
-        
-        return User()
-    
+        if rows:
+            return dict(rows)
+
+        rows = execute_query(
+            "SELECT * FROM models WHERE enabled = 1 ORDER BY priority DESC LIMIT 1",
+            fetch_one=True
+        )
+        if rows:
+            return dict(rows)
+
+        raise Exception("没有可用的模型配置，请先在模型配置中添加第三方大模型 API")
+
+    def _decrypt_key(self, model: Dict[str, Any]) -> str:
+        """解密 API Key"""
+        try:
+            if model.get("encryption_key"):
+                fernet = Fernet(model["encryption_key"].encode())
+                return fernet.decrypt(model["api_key_encrypted"].encode()).decode()
+        except Exception:
+            pass
+        return model.get("api_key_encrypted", "")
+
+    def _call_model_with_config(
+        self,
+        model: Dict[str, Any],
+        prompt: str,
+        temperature: float = 0.7,
+        max_tokens: int = 2000
+    ) -> str:
+        """使用指定模型配置调用 LLM"""
+        decrypted_key = self._decrypt_key(model)
+
+        config = {
+            "vendor": model["vendor"],
+            "name": model["name"],
+            "api_url": model["api_url"],
+            "api_key": decrypted_key
+        }
+
+        adapter = ModelAdapterFactory.create(config)
+        return adapter.call(
+            prompt,
+            temperature=temperature,
+            max_tokens=max_tokens
+        )
+
+    # ─── Session 管理 ─────────────────────────────────────────
+
+    def _new_context(
+        self,
+        session_id: str,
+        user_id: int,
+        image_path: Optional[str],
+        text: str
+    ) -> ContextContainer:
+        ctx = ContextContainer(
+            session_id=session_id or str(uuid.uuid4()),
+            user_id=user_id,
+            user_input=text,
+            image_path=image_path
+        )
+        # 获取 RAG 上下文
+        ctx.rag_context = self._get_rag_context(text)
+        return ctx
+
     def _get_rag_context(self, text: str) -> List[Dict[str, Any]]:
         if self.embedding_service._model is None:
-            print("DEBUG: 嵌入模型未加载，跳过RAG检索")
             return []
 
         query_vector = self.embedding_service.embed_text(text)
-        search_results = self.rag_service.search(query_vector, top_k=3, threshold=0.5)
+        results = self.rag_service.search(query_vector, top_k=3, threshold=0.5)
 
         contexts = []
-        for idx, score in search_results:
+        for idx, score in results:
             row = execute_query(
                 "SELECT * FROM prompts WHERE id = ?",
                 (idx,),
@@ -136,147 +408,56 @@ class MasterAgent:
             if row:
                 contexts.append({
                     "id": row["id"],
-                    "content": row["content"],
-                    "category": row["category"],
-                    "similarity": score
+                    "content": row["content"][:200],
+                    "similarity": float(score)
                 })
-
         return contexts
-    
-    def _identify_intent(self, image_path: Optional[str], text: str, user: User, rag_context: List[Dict[str, Any]]) -> Dict[str, Any]:
-        intent = self._simple_identify_intent(text)
 
-        if intent["confidence"] >= 0.9:
-            print(f"DEBUG: 使用简单意图识别: {intent['scene']}")
-            return intent
+    def _save_session(self, context: ContextContainer):
+        """保存或更新 session 到数据库"""
+        # 尝试更新已有 session
+        existing = execute_query(
+            "SELECT id FROM sessions WHERE session_id = ?",
+            (context.session_id,),
+            fetch_one=True
+        )
+        if existing:
+            execute_query(
+                "UPDATE sessions SET context_json = ?, updated_at = ? WHERE session_id = ?",
+                (context.serialize(), time.strftime("%Y-%m-%dT%H:%M:%S"), context.session_id)
+            )
+        else:
+            execute_query(
+                "INSERT INTO sessions (session_id, user_id, context_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+                (
+                    context.session_id,
+                    context.user_id,
+                    context.serialize(),
+                    context.created_at,
+                    context.updated_at
+                )
+            )
 
-        image_description = ""
-        if image_path:
+    def _load_session(self, session_id: str) -> Optional[ContextContainer]:
+        """从数据库加载 session"""
+        row = execute_query(
+            "SELECT context_json FROM sessions WHERE session_id = ?",
+            (session_id,),
+            fetch_one=True
+        )
+        if row:
             try:
-                image_description = self.vision_service.describe(image_path)
-            except Exception as e:
-                print(f"视觉模型调用失败: {e}")
-                image_description = ""
+                return ContextContainer.deserialize(row["context_json"])
+            except Exception:
+                return None
+        return None
 
-        context_text = "\n".join([f"参考{c['category']}提示词: {c['content']}" for c in rag_context])
-
-        prompt = f"""你是一个意图识别助手，需要判断用户的需求属于哪个场景。
-
-用户需求: {text}
-用户偏好: 风格={user.style}, 关键词={user.keywords}, 默认场景={user.default_scene}
-参考提示词: {context_text}"""
-
-        if image_description:
-            prompt += f"""
-图片描述: {image_description}"""
-
-        prompt += """
-请判断用户需求属于以下哪个场景:
-- ecommerce: 电商相关，如产品标题、卖点、详情页、营销文案等
-- poster: 海报设计相关，如构图、色彩、光影、风格、镜头、元素搭配等
-- other: 其他场景
-
-请以JSON格式返回，包含以下字段:
-{{
-  "scene": "ecommerce|poster|other",
-  "confidence": 0.0-1.0,
-  "reason": "判断理由"
-}}"""
-
-        model = self._select_model("general")
-        print(f"DEBUG: Selected model for intent: {model['name']}")
-
-        try:
-            print(f"DEBUG: Calling model with prompt...")
-            result = self._call_model(model, prompt)
-            print(f"DEBUG: Model returned result")
-
-            json_start = result.find("{")
-            json_end = result.rfind("}") + 1
-
-            if json_start >= 0 and json_end > json_start:
-                json_str = result[json_start:json_end]
-                intent_data = json.loads(json_str)
-
-                if "scene" in intent_data:
-                    return intent_data
-        except Exception as e:
-            print(f"意图识别失败: {e}")
-
-        return {
-            "scene": intent["scene"],
-            "confidence": intent["confidence"],
-            "reason": "意图识别失败，使用默认识别结果"
-        }
-
-    def _simple_identify_intent(self, text: str) -> Dict[str, Any]:
-        ecommerce_keywords = ["产品", "标题", "卖点", "详情", "营销", "文案", "电商", "商品", "宝贝", "主图", "SKU", "详情页", "推广", "优惠券", "促销", "购买", "订单", "发货", "物流"]
-        poster_keywords = ["海报", "设计", "构图", "色彩", "光影", "风格", "镜头", "元素", "视觉", "画面", "配色", "字体", "排版", "创意", "广告"]
-
-        text_lower = text.lower()
-        ecommerce_score = sum(1 for kw in ecommerce_keywords if kw in text_lower)
-        poster_score = sum(1 for kw in poster_keywords if kw in text_lower)
-
-        if ecommerce_score > poster_score and ecommerce_score >= 2:
-            return {"scene": "ecommerce", "confidence": 0.9, "reason": "基于关键词匹配"}
-        elif poster_score > ecommerce_score and poster_score >= 2:
-            return {"scene": "poster", "confidence": 0.9, "reason": "基于关键词匹配"}
-        elif ecommerce_score > 0 or poster_score > 0:
-            if ecommerce_score > poster_score:
-                return {"scene": "ecommerce", "confidence": 0.5, "reason": "基于关键词匹配"}
-            else:
-                return {"scene": "poster", "confidence": 0.5, "reason": "基于关键词匹配"}
-
-        return {"scene": "other", "confidence": 0.3, "reason": "无法识别，使用默认"}
-    
-    def _select_model(self, scene: str) -> Dict[str, Any]:
-        rows = execute_query(
-            "SELECT * FROM models WHERE enabled = 1 AND (scene = ? OR scene IS NULL) ORDER BY priority DESC LIMIT 1",
-            (scene,),
+    def _get_user_preference(self, user_id: int) -> Dict[str, Any]:
+        row = execute_query(
+            "SELECT * FROM users WHERE id = ?",
+            (user_id,),
             fetch_one=True
         )
-        
-        if rows:
-            return dict(rows)
-        
-        rows = execute_query(
-            "SELECT * FROM models WHERE enabled = 1 ORDER BY priority DESC LIMIT 1",
-            fetch_one=True
-        )
-        
-        if rows:
-            return dict(rows)
-        
-        raise Exception("没有可用的模型配置，请先在模型配置中添加第三方大模型API")
-    
-    def _call_model(self, model: Dict[str, Any], prompt: str) -> str:
-        print(f"DEBUG _call_model: model={model['name']}, prompt_len={len(prompt)}")
-        try:
-            if model.get("encryption_key"):
-                fernet = Fernet(model["encryption_key"].encode())
-                decrypted_key = fernet.decrypt(model["api_key_encrypted"].encode()).decode()
-            else:
-                decrypted_key = model["api_key_encrypted"]
-        except Exception as e:
-            print(f"解密API密钥失败: {e}")
-            decrypted_key = model["api_key_encrypted"]
-
-        config = {
-            "vendor": model["vendor"],
-            "name": model["name"],
-            "api_url": model["api_url"],
-            "api_key": decrypted_key
-        }
-        print(f"DEBUG _call_model: creating adapter")
-        adapter = ModelAdapterFactory.create(config)
-        print(f"DEBUG _call_model: calling adapter.call()")
-        result = adapter.call(prompt)
-        print(f"DEBUG _call_model: got result")
-        return result
-    
-    def _log_request(self, user_id: int, intent_result: str, agent_used: str, model_id: Optional[int], duration_ms: int, success: int, error: Optional[str] = None):
-        execute_query(
-            """INSERT INTO logs (user_id, intent_result, agent_used, model_id, duration_ms, success, error)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (user_id, intent_result, agent_used, model_id, duration_ms, success, error)
-        )
+        if row:
+            return dict(row)
+        return {}
