@@ -1,18 +1,39 @@
-try:
-    from sentence_transformers import SentenceTransformer
-    HAS_SENTENCE_TRANSFORMERS = True
-except ImportError:
-    HAS_SENTENCE_TRANSFORMERS = False
-    print("警告: sentence-transformers 未安装，将使用简单文本哈希作为向量")
-
 import os
 import hashlib
 from typing import List
+
+SKIP_EMBEDDING_MODEL = os.environ.get('SKIP_EMBEDDING_MODEL', '1') == '1'
+HAS_SENTENCE_TRANSFORMERS = None
+SentenceTransformer = None
+
+# 预先设置为False，避免导入sentence_transformers
+HAS_SENTENCE_TRANSFORMERS = False
+
+
+def _check_sentence_transformers():
+    global HAS_SENTENCE_TRANSFORMERS, SentenceTransformer
+    if HAS_SENTENCE_TRANSFORMERS is not None:
+        return HAS_SENTENCE_TRANSFORMERS
+    
+    if SKIP_EMBEDDING_MODEL:
+        HAS_SENTENCE_TRANSFORMERS = False
+        return False
+    
+    try:
+        from sentence_transformers import SentenceTransformer as ST
+        SentenceTransformer = ST
+        HAS_SENTENCE_TRANSFORMERS = True
+    except ImportError:
+        HAS_SENTENCE_TRANSFORMERS = False
+        print("警告: sentence-transformers 未安装，将使用简单文本哈希作为向量")
+    
+    return HAS_SENTENCE_TRANSFORMERS
 
 
 class EmbeddingService:
     _instance = None
     _model = None
+    _model_load_attempted = False
     
     def __new__(cls):
         if cls._instance is None:
@@ -20,11 +41,17 @@ class EmbeddingService:
         return cls._instance
     
     def __init__(self):
-        if self._model is None:
+        if not self._model_load_attempted:
+            self._model_load_attempted = True
             self._load_model()
     
     def _load_model(self):
-        if HAS_SENTENCE_TRANSFORMERS:
+        if SKIP_EMBEDDING_MODEL:
+            print("嵌入模型加载已跳过（设置 SKIP_EMBEDDING_MODEL=0 启用），使用简单文本哈希作为向量")
+            self._model = None
+            return
+        
+        if _check_sentence_transformers():
             model_name = 'm3e-small'
             device = 'cpu'
 
@@ -36,7 +63,7 @@ class EmbeddingService:
                 print(f"嵌入模型加载失败: {e}，将使用简单文本哈希作为向量")
                 self._model = None
         else:
-            print("使用简单文本哈希作为向量（需安装 sentence-transformers 以获得更好的语义检索效果）")
+            print("使用简单文本哈希作为向量")
     
     def embed_text(self, text: str) -> List[float]:
         if HAS_SENTENCE_TRANSFORMERS and self._model is not None:

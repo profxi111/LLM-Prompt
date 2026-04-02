@@ -54,6 +54,7 @@ class S2CompositionGenAgent(BaseAgent):
         构建 prompt 并调用 LLM 生成构图提示词。
         S2 输出是 S3/S4 的输入，S2 不做整理。
         """
+        print("DEBUG S2: _do_process 开始")
         # 构建用户偏好字符串
         preference_parts = []
         if user:
@@ -64,14 +65,18 @@ class S2CompositionGenAgent(BaseAgent):
             if user.get("tone"):
                 preference_parts.append(f"语气：{user['tone']}")
         user_preference = "\n".join(preference_parts) or "（无）"
+        print(f"DEBUG S2: 用户偏好构建完成")
 
         # 获取图片描述（S1 输出）
         s1_output = context.get_output("S1")
         image_description = s1_output.output_text if s1_output else "（无图片）"
+        print(f"DEBUG S2: 图片描述获取完成")
 
         # 获取 RAG 上下文
+        print("DEBUG S2: 获取RAG上下文...")
         rag_text = self._get_rag_context(context.user_input, top_k=3)
         rag_context = rag_text if rag_text else "（无相关参考）"
+        print(f"DEBUG S2: RAG上下文获取完成")
 
         prompt = S2_USER_TEMPLATE.format(
             user_input=context.user_input,
@@ -79,9 +84,12 @@ class S2CompositionGenAgent(BaseAgent):
             user_preference=user_preference,
             rag_context=rag_context
         )
+        print(f"DEBUG S2: prompt构建完成, 长度={len(prompt)}")
 
         # 调用 LLM（由 MasterAgent 注入）
+        print("DEBUG S2: 调用LLM...")
         result = self._call_llm_in_subagent(prompt, context)
+        print(f"DEBUG S2: LLM调用完成, 结果长度={len(result) if result else 0}")
         return result
 
     def _build_input(self, context: ContextContainer,
@@ -93,11 +101,9 @@ class S2CompositionGenAgent(BaseAgent):
         在子 Agent 中调用 LLM。
         子 Agent 的 LLM 调用统一通过 MasterAgent 路由。
         """
-        # 获取 MasterAgent 的 _call_model 方法（通过 context 传递）
         if hasattr(self, "_master_call_model") and self._master_call_model:
-            return self._master_call_model(prompt, context=context)
+            return self._master_call_model(prompt)
 
-        # 如果没有 master 引用，抛出明确错误
         raise RuntimeError(
             f"S2 ({self.agent_id}) 需要 LLM 调用，但未注入 _master_call_model。"
             " 请通过 MasterAgent 调用子 Agent。"

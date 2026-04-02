@@ -48,9 +48,12 @@ class MasterAgent:
         如果传入 session_id，则继续该会话；否则创建新会话。
         """
         start_time = time.time()
+        print(f"DEBUG: process_request 开始, text={text}")
 
         try:
+            print("DEBUG: 获取用户偏好...")
             user = self._get_user_preference(user_id)
+            print(f"DEBUG: 用户偏好: {user}")
 
             # 获取或创建 ContextContainer
             if session_id:
@@ -58,14 +61,20 @@ class MasterAgent:
                 if context is None:
                     context = self._new_context(session_id, user_id, image_path, text)
             else:
+                print("DEBUG: 创建新context...")
                 context = self._new_context("", user_id, image_path, text)
+                print(f"DEBUG: context创建完成, session_id={context.session_id}")
 
             # 意图识别 + 路由决策
+            print("DEBUG: 决定路由...")
             route = self._decide_route(image_path, text, user)
+            print(f"DEBUG: 路由={route}")
             context.route = route
 
             # 根据路由执行 Agent 链
+            print(f"DEBUG: 执行路由 {route}...")
             result_prompt = self._execute_route(context, route, user)
+            print(f"DEBUG: 路由执行完成, result长度={len(result_prompt) if result_prompt else 0}")
 
             # 设置最终输出
             context.set_final(result_prompt)
@@ -77,6 +86,7 @@ class MasterAgent:
             # 保存 session
             self._save_session(context)
 
+            print(f"DEBUG: process_request 完成, 耗时={total_ms}ms")
             return {
                 "code": 0,
                 "message": "生成成功",
@@ -94,6 +104,7 @@ class MasterAgent:
 
         except Exception as e:
             total_ms = int((time.time() - start_time) * 1000)
+            print(f"DEBUG: 异常: {e}")
             return {
                 "code": -1,
                 "message": f"处理失败: {str(e)}",
@@ -237,6 +248,7 @@ class MasterAgent:
         根据路由执行对应的 Agent 链。
         每个子 Agent 需要注入 master 的 LLM 调用方法。
         """
+        print(f"DEBUG: _execute_route 开始, route={route}")
         master_call = lambda prompt, **kw: self._call_model_for_subagent(
             prompt, context=context, **kw
         )
@@ -245,11 +257,9 @@ class MasterAgent:
             from backend.agents.sub.k1_classifier import K1ClassifierAgent
             agent = K1ClassifierAgent()
             context = agent.execute(context, user)
-            # K1 不输出 prompt，仅分类
             return context.classified_category or "general"
 
         elif route == "S1_S2_S3":
-            # S1 → S2 → S3
             from backend.agents.sub.s1_image_understand import S1ImageUnderstandAgent
             from backend.agents.sub.s2_composition_gen import S2CompositionGenAgent
             from backend.agents.sub.s3_organize import S3OrganizeAgent
@@ -269,16 +279,23 @@ class MasterAgent:
             return s3_out.output_text if s3_out else ""
 
         elif route == "S2_S3":
+            print("DEBUG: 导入S2和S3...")
             from backend.agents.sub.s2_composition_gen import S2CompositionGenAgent
             from backend.agents.sub.s3_organize import S3OrganizeAgent
 
+            print("DEBUG: 创建S2 Agent...")
             s2 = S2CompositionGenAgent()
             s2._master_call_model = master_call
+            print("DEBUG: 执行S2...")
             context = s2.execute(context, user)
+            print(f"DEBUG: S2执行完成")
 
+            print("DEBUG: 创建S3 Agent...")
             s3 = S3OrganizeAgent()
             s3._master_call_model = master_call
+            print("DEBUG: 执行S3...")
             context = s3.execute(context, user)
+            print(f"DEBUG: S3执行完成")
 
             s3_out = context.get_output("S3")
             return s3_out.output_text if s3_out else ""
@@ -311,13 +328,17 @@ class MasterAgent:
         max_tokens: int = 2000
     ) -> str:
         """供子 Agent 调用的 LLM 入口"""
+        print(f"DEBUG: _call_model_for_subagent 开始, prompt长度={len(prompt)}")
         model = self._select_model("general")
-        return self._call_model_with_config(
+        print(f"DEBUG: 选中模型: {model['name']}, vendor={model['vendor']}")
+        result = self._call_model_with_config(
             model=model,
             prompt=prompt,
             temperature=temperature,
             max_tokens=max_tokens
         )
+        print(f"DEBUG: _call_model_for_subagent 完成, 结果长度={len(result) if result else 0}")
+        return result
 
     def _select_model(self, scene: str) -> Dict[str, Any]:
         """从数据库选择最高优先级的可用模型"""
@@ -356,7 +377,9 @@ class MasterAgent:
         max_tokens: int = 2000
     ) -> str:
         """使用指定模型配置调用 LLM"""
+        print(f"DEBUG: _call_model_with_config 开始")
         decrypted_key = self._decrypt_key(model)
+        print(f"DEBUG: API Key解密完成")
 
         config = {
             "vendor": model["vendor"],
@@ -364,13 +387,19 @@ class MasterAgent:
             "api_url": model["api_url"],
             "api_key": decrypted_key
         }
+        print(f"DEBUG: 创建adapter, vendor={config['vendor']}, url={config['api_url']}")
 
         adapter = ModelAdapterFactory.create(config)
-        return adapter.call(
+        print(f"DEBUG: adapter创建完成: {adapter}")
+
+        print("DEBUG: 调用adapter.call()...")
+        result = adapter.call(
             prompt,
             temperature=temperature,
             max_tokens=max_tokens
         )
+        print(f"DEBUG: adapter.call()完成, 结果长度={len(result) if result else 0}")
+        return result
 
     # ─── Session 管理 ─────────────────────────────────────────
 
